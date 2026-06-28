@@ -209,9 +209,16 @@ const Review = ({ photos, onRetake, onHome }) => {
   const [frameConfigs, setFrameConfigs] = useState({});
   const [stripWidth, setStripWidth] = useState(300);
 
-  // Supabase dynamic frames
   const [dbFrames, setDbFrames] = useState([]);
   const [canShare] = useState(() => !!(typeof navigator !== 'undefined' && navigator.share && navigator.canShare));
+  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+
+  const showToast = (message, type = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast(prev => prev.message === message ? { ...prev, show: false } : prev);
+    }, 3500);
+  };
 
   // Fetch dynamic frames on mount
   useEffect(() => {
@@ -382,7 +389,7 @@ const Review = ({ photos, onRetake, onHome }) => {
             console.log('Share action closed/cancelled:', shareErr);
           }
         } else {
-          alert('Sharing is not supported on this device. Standard download will start.');
+          showToast('Fitur berbagi tidak didukung pada browser ini. Proses download dimulai...', 'info');
           const localUrl = URL.createObjectURL(blob);
           const link = document.createElement('a');
           link.download = file.name;
@@ -444,7 +451,7 @@ const Review = ({ photos, onRetake, onHome }) => {
         URL.revokeObjectURL(localUrl);
 
         setIsDownloading(false);
-        alert('HD strip downloaded successfully!');
+        showToast('Foto strip HD berhasil diunduh!', 'success');
       }, 'image/png', 1.0);
     } catch (err) {
       console.error('Failed to capture strip:', err);
@@ -891,6 +898,34 @@ const Review = ({ photos, onRetake, onHome }) => {
 
         </div>
       </div>
+      
+      {toast.show && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.9)' : (toast.type === 'success' ? 'rgba(34, 197, 94, 0.9)' : 'rgba(99, 102, 241, 0.9)'),
+          color: 'white',
+          padding: '0.75rem 1.5rem',
+          borderRadius: '0.5rem',
+          backdropFilter: 'blur(10px)',
+          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          fontFamily: 'Outfit',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          {toast.type === 'success' && <span>✅</span>}
+          {toast.type === 'error' && <span>❌</span>}
+          {toast.type === 'info' && <span>ℹ️</span>}
+          <span style={{ whiteSpace: 'pre-line' }}>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 };

@@ -116,7 +116,7 @@ export const LoginScreen = ({ onLogin, onExit }) => {
 };
 
 // ─── Whats New Editor Component ──────────────────────────────────────────────
-const WhatsNewEditor = () => {
+const WhatsNewEditor = ({ showToast }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [newIcon, setNewIcon] = useState('🆕');
@@ -153,9 +153,9 @@ const WhatsNewEditor = () => {
           setItems(data);
         }
       }
-      alert('Announcements saved successfully!');
+      showToast('Announcements saved successfully!', 'success');
     } catch (err) {
-      alert('Failed to save: ' + (err.message || err));
+      showToast('Failed to save: ' + (err.message || err), 'error');
     } finally {
       setSaving(false);
     }
@@ -387,6 +387,15 @@ const FrameAdmin = ({ onExit }) => {
   const [aspectRatioLocked, setAspectRatioLocked] = useState(true);
   const containerRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
+
+  const showToast = (message, type = 'info') => {
+    setToast({ show: true, message, type });
+    setTimeout(() => {
+      setToast(prev => prev.message === message ? { ...prev, show: false } : prev);
+    }, 3500);
+  };
   
   const label = f => {
     if (!f) return '';
@@ -456,7 +465,7 @@ const FrameAdmin = ({ onExit }) => {
     });
 
     if (pngFiles.length === 0) {
-      alert('Hanya berkas gambar format PNG (.png) yang didukung.');
+      showToast('Hanya berkas gambar format PNG (.png) yang didukung.', 'error');
       e.target.value = null;
       return;
     }
@@ -509,12 +518,12 @@ const FrameAdmin = ({ onExit }) => {
       }
 
       if (errors.length > 0) {
-        alert(`Berhasil mengunggah ${successCount} bingkai.\nGagal mengunggah beberapa bingkai:\n${errors.join('\n')}`);
+        showToast(`Berhasil mengunggah ${successCount} bingkai.\nGagal mengunggah beberapa bingkai:\n${errors.join('\n')}`, 'error');
       } else {
-        alert(`Berhasil mengunggah ${successCount} bingkai PNG!`);
+        showToast(`Berhasil mengunggah ${successCount} bingkai PNG!`, 'success');
       }
     } catch (err) {
-      alert(`Terjadi kesalahan sistem saat mengunggah: ${err.message || err}`);
+      showToast(`Terjadi kesalahan sistem saat mengunggah: ${err.message || err}`, 'error');
     } finally {
       setUploadingFrame(false);
       e.target.value = null;
@@ -530,7 +539,7 @@ const FrameAdmin = ({ onExit }) => {
     });
 
     if (pngFiles.length === 0) {
-      alert('Tidak ditemukan berkas gambar PNG (.png) di dalam folder tersebut.');
+      showToast('Tidak ditemukan berkas gambar PNG (.png) di dalam folder tersebut.', 'error');
       e.target.value = null;
       return;
     }
@@ -588,12 +597,12 @@ const FrameAdmin = ({ onExit }) => {
       }
 
       if (errors.length > 0) {
-        alert(`Berhasil mengunggah ${successCount} bingkai dari folder.\nGagal mengunggah beberapa berkas:\n${errors.join('\n')}`);
+        showToast(`Berhasil mengunggah ${successCount} bingkai dari folder.\nGagal mengunggah beberapa berkas:\n${errors.join('\n')}`, 'error');
       } else {
-        alert(`Berhasil mengunggah folder: ${successCount} bingkai PNG berhasil diunggah!`);
+        showToast(`Berhasil mengunggah folder: ${successCount} bingkai PNG berhasil diunggah!`, 'success');
       }
     } catch (err) {
-      alert(`Terjadi kesalahan sistem saat mengunggah folder: ${err.message || err}`);
+      showToast(`Terjadi kesalahan sistem saat mengunggah folder: ${err.message || err}`, 'error');
     } finally {
       setUploadingFrame(false);
       e.target.value = null;
@@ -764,9 +773,9 @@ const FrameAdmin = ({ onExit }) => {
         setFrame('');
       }
 
-      alert('Bingkai berhasil dihapus!');
+      showToast('Bingkai berhasil dihapus!', 'success');
     } catch (err) {
-      alert(`Gagal menghapus bingkai: ${err.message || err}`);
+      showToast(`Gagal menghapus bingkai: ${err.message || err}`, 'error');
     }
   };
 
@@ -799,12 +808,12 @@ const FrameAdmin = ({ onExit }) => {
         if (parsed && typeof parsed === 'object') {
           setConfigs(parsed);
           setSaved(false);
-          alert('Config imported! Click "Save All" to commit changes.\n\nTip: to make this permanent for ALL devices, replace /public/frame/configs.json with this file and redeploy.');
+          showToast('Config imported! Click "Save All" to commit changes.', 'success');
         } else {
-          alert('Invalid config format.');
+          showToast('Invalid config format.', 'error');
         }
       } catch {
-        alert('Could not parse JSON file.');
+        showToast('Could not parse JSON file.', 'error');
       }
     };
     reader.readAsText(file);
@@ -860,7 +869,7 @@ const FrameAdmin = ({ onExit }) => {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {activeTab === 'news' ? (
-          <WhatsNewEditor />
+          <WhatsNewEditor showToast={showToast} />
         ) : (
           <>
             {/* Frame list */}
@@ -1088,6 +1097,34 @@ const FrameAdmin = ({ onExit }) => {
           </>
         )}
       </div>
+
+      {toast.show && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.9)' : (toast.type === 'success' ? 'rgba(34, 197, 94, 0.9)' : 'rgba(99, 102, 241, 0.9)'),
+          color: 'white',
+          padding: '0.75rem 1.5rem',
+          borderRadius: '0.5rem',
+          backdropFilter: 'blur(10px)',
+          boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3)',
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          fontFamily: 'Outfit',
+          fontSize: '0.85rem',
+          fontWeight: 600,
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          {toast.type === 'success' && <span>✅</span>}
+          {toast.type === 'error' && <span>❌</span>}
+          {toast.type === 'info' && <span>ℹ️</span>}
+          <span style={{ whiteSpace: 'pre-line' }}>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 };
