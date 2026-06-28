@@ -387,6 +387,55 @@ const FrameAdmin = ({ onExit }) => {
   const containerRef = useRef(null);
   const fileInputRef = useRef(null);
   const [bulkSelection, setBulkSelection] = useState(new Set());
+  const [collapsedFolders, setCollapsedFolders] = useState(new Set());
+
+  const toggleFolderCollapse = (folder) => {
+    setCollapsedFolders(prev => {
+      const copy = new Set(prev);
+      if (copy.has(folder)) copy.delete(folder); else copy.add(folder);
+      return copy;
+    });
+  };
+
+  const allFrames = useMemo(() => [...FRAME_LIST, ...dbFrames], [dbFrames]);
+
+  const groupedFrames = useMemo(() => {
+    const groups = {};
+    allFrames.forEach(f => {
+      const lbl = label(f);
+      const parts = lbl.split('/');
+      let folder = 'Direct Uploads';
+      let name = lbl;
+      if (parts.length > 1) {
+        folder = parts[0];
+        name = parts.slice(1).join('/');
+      }
+      if (!groups[folder]) groups[folder] = [];
+      groups[folder].push({ url: f, name });
+    });
+    return groups;
+  }, [allFrames]);
+
+  const toggleSelectFolder = (folder, select) => {
+    const folderFrames = groupedFrames[folder] || [];
+    const next = new Set(bulkSelection);
+    folderFrames.forEach(item => {
+      if (select) next.add(item.url); else next.delete(item.url);
+    });
+    setBulkSelection(next);
+  };
+
+  const isFolderAllSelected = (folder) => {
+    const folderFrames = groupedFrames[folder] || [];
+    if (folderFrames.length === 0) return false;
+    return folderFrames.every(item => bulkSelection.has(item.url));
+  };
+
+  const isFolderSomeSelected = (folder) => {
+    const folderFrames = groupedFrames[folder] || [];
+    const selectedCount = folderFrames.filter(item => bulkSelection.has(item.url)).length;
+    return selectedCount > 0 && selectedCount < folderFrames.length;
+  };
 
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
 
@@ -429,8 +478,6 @@ const FrameAdmin = ({ onExit }) => {
     }
     return null;
   };
-
-  const allFrames = useMemo(() => [...FRAME_LIST, ...dbFrames], [dbFrames]);
 
   // Load configs and dynamic frames on mount
   useEffect(() => {
@@ -964,7 +1011,7 @@ const FrameAdmin = ({ onExit }) => {
         ) : (
           <>
             {/* Frame list */}
-            <div style={{ width: 160, borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+            <div style={{ width: 220, borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
               <div style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <input type="file" accept="image/png" multiple style={{ display: 'none' }} ref={uploadFileInputRef} onChange={handleFrameUpload} />
                 <input type="file" webkitdirectory="" directory="" style={{ display: 'none' }} ref={uploadFolderInputRef} onChange={handleFolderUpload} />
@@ -1017,40 +1064,131 @@ const FrameAdmin = ({ onExit }) => {
               )}
 
               <div style={{ flex: 1, overflowY: 'auto' }}>
-                {allFrames.map(f => {
-                  const ok = (configs[f]?.slots?.length > 0) || (getConfigForFrame(f)?.slots?.length > 0);
-                  const isDynamic = dbFrames.includes(f);
-                  const isSelected = bulkSelection.has(f);
+                {Object.keys(groupedFrames).map(folder => {
+                  const items = groupedFrames[folder];
+                  const isCollapsed = collapsedFolders.has(folder);
+                  const isAllSel = isFolderAllSelected(folder);
+                  const isSomeSel = isFolderSomeSelected(folder);
+
                   return (
-                    <div key={f} style={{ display: 'flex', alignItems: 'center', width: '100%', paddingRight: '0.5rem', background: frame === f ? 'rgba(99,102,241,0.1)' : 'transparent', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => {
-                          const next = new Set(bulkSelection);
-                          if (next.has(f)) next.delete(f); else next.add(f);
-                          setBulkSelection(next);
+                    <div key={folder} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                      {/* Folder Header */}
+                      <div 
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          padding: '0.45rem 0.5rem', 
+                          background: 'rgba(255,255,255,0.02)', 
+                          gap: '0.35rem',
+                          justifyContent: 'space-between'
                         }}
-                        style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
-                      />
-                      <button onClick={() => setFrame(f)}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.55rem 0.5rem', background: 'transparent', border: 'none', borderLeft: frame === f ? '3px solid #6366f1' : '3px solid transparent', color: frame === f ? '#fafafa' : '#71717a', cursor: 'pointer', textAlign: 'left', fontSize: '0.78rem', fontFamily: 'Outfit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ok ? <CheckCircle size={12} color="#22c55e" /> : <AlertCircle size={12} color="#52525b" />}
-                        {label(f)}
-                      </button>
-                      {isDynamic && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteFrame(f);
-                          }}
-                          title="Delete Frame Template"
-                          style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center', opacity: 0.7 }}
-                          onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                          onMouseLeave={e => e.currentTarget.style.opacity = 0.7}
-                        >
-                          🗑️
-                        </button>
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, flex: 1 }}>
+                          <input
+                            type="checkbox"
+                            checked={isAllSel}
+                            ref={el => { if (el) el.indeterminate = isSomeSel; }}
+                            onChange={(e) => toggleSelectFolder(folder, e.target.checked)}
+                            style={{ cursor: 'pointer' }}
+                          />
+                          <div 
+                            onClick={() => toggleFolderCollapse(folder)}
+                            style={{ 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              gap: '0.3rem', 
+                              cursor: 'pointer', 
+                              fontSize: '0.75rem', 
+                              fontWeight: 700, 
+                              color: '#a1a1aa',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              userSelect: 'none',
+                              flex: 1
+                            }}
+                          >
+                            <span>{isCollapsed ? '▶' : '▼'}</span>
+                            <span title={folder}>📁 {folder}</span>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '0.68rem', color: '#52525b', fontWeight: 600 }}>({items.length})</span>
+                      </div>
+
+                      {/* Folder Items */}
+                      {!isCollapsed && (
+                        <div style={{ background: 'rgba(0,0,0,0.15)' }}>
+                          {items.map(({ url, name }) => {
+                            const ok = (configs[url]?.slots?.length > 0) || (getConfigForFrame(url)?.slots?.length > 0);
+                            const isDynamic = dbFrames.includes(url);
+                            const isSelected = bulkSelection.has(url);
+                            const isActive = frame === url;
+
+                            return (
+                              <div 
+                                key={url} 
+                                style={{ 
+                                  display: 'flex', 
+                                  alignItems: 'center', 
+                                  width: '100%', 
+                                  paddingRight: '0.5rem', 
+                                  background: isActive ? 'rgba(99,102,241,0.1)' : 'transparent',
+                                  paddingLeft: '0.75rem',
+                                  borderBottom: '1px solid rgba(255,255,255,0.01)'
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => {
+                                    const next = new Set(bulkSelection);
+                                    if (next.has(url)) next.delete(url); else next.add(url);
+                                    setBulkSelection(next);
+                                  }}
+                                  style={{ cursor: 'pointer' }}
+                                />
+                                <button 
+                                  onClick={() => setFrame(url)}
+                                  style={{ 
+                                    flex: 1, 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.4rem', 
+                                    padding: '0.5rem 0.4rem', 
+                                    background: 'transparent', 
+                                    border: 'none', 
+                                    borderLeft: isActive ? '3px solid #6366f1' : '3px solid transparent', 
+                                    color: isActive ? '#fafafa' : '#71717a', 
+                                    cursor: 'pointer', 
+                                    textAlign: 'left', 
+                                    fontSize: '0.78rem', 
+                                    fontFamily: 'Outfit', 
+                                    overflow: 'hidden', 
+                                    textOverflow: 'ellipsis', 
+                                    whiteSpace: 'nowrap' 
+                                  }}
+                                >
+                                  {ok ? <CheckCircle size={10} color="#22c55e" /> : <AlertCircle size={10} color="#52525b" />}
+                                  <span title={name}>{name}</span>
+                                </button>
+                                {isDynamic && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteFrame(url);
+                                    }}
+                                    title="Delete Frame Template"
+                                    style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.2rem', display: 'flex', alignItems: 'center', opacity: 0.7 }}
+                                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                                    onMouseLeave={e => e.currentTarget.style.opacity = 0.7}
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
                     </div>
                   );
