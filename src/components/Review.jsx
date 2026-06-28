@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Download, RefreshCcw, Home as HomeIcon, Palette, Upload, Sliders, Type, Share2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { loadConfigs } from '../utils/configLoader';
@@ -239,6 +239,39 @@ const Review = ({ photos, onRetake, onHome }) => {
     fetchDynamicFrames();
   }, []);
 
+  const label = f => {
+    if (!f) return '';
+    try {
+      const decoded = decodeURIComponent(f);
+      const parts = decoded.split('/storage/v1/object/public/frames/');
+      if (parts.length === 2) {
+        const path = parts[1];
+        const pathParts = path.split('/');
+        const fileName = pathParts.pop();
+        const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
+        if (pathParts.length > 0) {
+          return `${pathParts.join('/')}/${cleanedFileName}`;
+        }
+        return cleanedFileName;
+      }
+      return decoded.split('/').pop().replace('.png', '');
+    } catch {
+      return f.split('/').pop().replace('.png', '');
+    }
+  };
+
+  const getConfigForFrame = useCallback((f) => {
+    if (!f) return null;
+    if (frameConfigs[f]) return frameConfigs[f];
+    const cleanF = label(f).split('/').pop();
+    for (const key of Object.keys(frameConfigs)) {
+      if (label(key).split('/').pop() === cleanF) {
+        return frameConfigs[key];
+      }
+    }
+    return null;
+  }, [frameConfigs]);
+
   const allFrames = [...STATIC_FRAMES, ...dbFrames];
 
   // Track strip width for dynamic layout scaling (especially on mobile)
@@ -279,7 +312,8 @@ const Review = ({ photos, onRetake, onHome }) => {
       const ch = container.offsetHeight;
       if (!cw || !ch) return; // layout not ready yet, skip
 
-      const slotConfig = frameConfigs[selectedFrame]?.slots;
+      const activeConfig = getConfigForFrame(selectedFrame);
+      const slotConfig = activeConfig?.slots;
 
       if (slotConfig && slotConfig.length > 0) {
         // Initialize default pan & zoom offsets for each photo slot
@@ -314,7 +348,7 @@ const Review = ({ photos, onRetake, onHome }) => {
     // Use rAF to wait for CSS layout to settle before reading px dimensions
     const raf = requestAnimationFrame(applyTransforms);
     return () => cancelAnimationFrame(raf);
-  }, [selectedFrame, photos, frameConfigs, photoTransforms.length]);
+  }, [selectedFrame, photos, frameConfigs, photoTransforms.length, getConfigForFrame]);
 
   // Filter Intensities (0-100)
   const [grayscaleInt, setGrayscaleInt] = useState(0);
@@ -513,7 +547,8 @@ const Review = ({ photos, onRetake, onHome }) => {
             {/* Frame mode: each photo is independently draggable/resizable/rotatable */}
             {selectedFrame ? (
               photos.map((p, idx) => {
-                const slotConfig = frameConfigs[selectedFrame]?.slots;
+                const activeConfig = getConfigForFrame(selectedFrame);
+                const slotConfig = activeConfig?.slots;
                 const slot = slotConfig ? slotConfig[idx % slotConfig.length] : null;
                 return (
                   slot && photoTransforms[idx] ? (

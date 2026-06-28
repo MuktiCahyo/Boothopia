@@ -418,6 +418,18 @@ const FrameAdmin = ({ onExit }) => {
     }
   };
 
+  const getConfigForFrame = (f) => {
+    if (!f) return null;
+    if (configs[f]) return configs[f];
+    const cleanF = label(f).split('/').pop();
+    for (const key of Object.keys(configs)) {
+      if (label(key).split('/').pop() === cleanF) {
+        return configs[key];
+      }
+    }
+    return null;
+  };
+
   const allFrames = useMemo(() => [...FRAME_LIST, ...dbFrames], [dbFrames]);
 
   // Load configs and dynamic frames on mount
@@ -609,7 +621,8 @@ const FrameAdmin = ({ onExit }) => {
     }
   };
 
-  const slots = configs[frame]?.slots || EMPTY_SLOTS;
+  const activeConfig = getConfigForFrame(frame);
+  const slots = activeConfig?.slots || EMPTY_SLOTS;
   const hasConfig = slots.length > 0;
 
   // Which slot indices are currently targeted
@@ -894,7 +907,7 @@ const FrameAdmin = ({ onExit }) => {
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {allFrames.map(f => {
-                  const ok = configs[f]?.slots?.length > 0;
+                  const ok = (configs[f]?.slots?.length > 0) || (getConfigForFrame(f)?.slots?.length > 0);
                   const isDynamic = dbFrames.includes(f);
                   return (
                     <div key={f} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '0.5rem', background: frame === f ? 'rgba(99,102,241,0.1)' : 'transparent' }}>
