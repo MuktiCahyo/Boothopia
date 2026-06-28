@@ -366,6 +366,27 @@ const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, aspectRatioL
   );
 };
 
+const label = f => {
+  if (!f) return '';
+  try {
+    const decoded = decodeURIComponent(f);
+    const parts = decoded.split('/storage/v1/object/public/frames/');
+    if (parts.length === 2) {
+      const path = parts[1];
+      const pathParts = path.split('/');
+      const fileName = pathParts.pop();
+      const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
+      if (pathParts.length > 0) {
+        return `${pathParts.join('/')}/${cleanedFileName}`;
+      }
+      return cleanedFileName;
+    }
+    return decoded.split('/').pop().replace('.png', '');
+  } catch {
+    return f.split('/').pop().replace('.png', '');
+  }
+};
+
 // ─── Main Admin (Default Export) ──────────────────────────────────────────────
 const FrameAdmin = ({ onExit }) => {
   const [activeTab, setActiveTab] = useState('frames'); // 'frames' or 'news'
@@ -445,27 +466,7 @@ const FrameAdmin = ({ onExit }) => {
       setToast(prev => prev.message === message ? { ...prev, show: false } : prev);
     }, 3500);
   };
-  
-  const label = f => {
-    if (!f) return '';
-    try {
-      const decoded = decodeURIComponent(f);
-      const parts = decoded.split('/storage/v1/object/public/frames/');
-      if (parts.length === 2) {
-        const path = parts[1];
-        const pathParts = path.split('/');
-        const fileName = pathParts.pop();
-        const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
-        if (pathParts.length > 0) {
-          return `${pathParts.join('/')}/${cleanedFileName}`;
-        }
-        return cleanedFileName;
-      }
-      return decoded.split('/').pop().replace('.png', '');
-    } catch {
-      return f.split('/').pop().replace('.png', '');
-    }
-  };
+
 
   const getConfigForFrame = (f) => {
     if (!f) return null;

@@ -187,6 +187,27 @@ const PRESET_BGS = [
   { type: 'image', value: '/backgrounds/mobil2.jpg', thumb: 'url(/backgrounds/mobil2.jpg)' }
 ];
 
+const label = f => {
+  if (!f) return '';
+  try {
+    const decoded = decodeURIComponent(f);
+    const parts = decoded.split('/storage/v1/object/public/frames/');
+    if (parts.length === 2) {
+      const path = parts[1];
+      const pathParts = path.split('/');
+      const fileName = pathParts.pop();
+      const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
+      if (pathParts.length > 0) {
+        return `${pathParts.join('/')}/${cleanedFileName}`;
+      }
+      return cleanedFileName;
+    }
+    return decoded.split('/').pop().replace('.png', '');
+  } catch {
+    return f.split('/').pop().replace('.png', '');
+  }
+};
+
 const Review = ({ photos, onRetake, onHome }) => {
   const stripRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -238,26 +259,7 @@ const Review = ({ photos, onRetake, onHome }) => {
     fetchDynamicFrames();
   }, []);
 
-  const label = f => {
-    if (!f) return '';
-    try {
-      const decoded = decodeURIComponent(f);
-      const parts = decoded.split('/storage/v1/object/public/frames/');
-      if (parts.length === 2) {
-        const path = parts[1];
-        const pathParts = path.split('/');
-        const fileName = pathParts.pop();
-        const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
-        if (pathParts.length > 0) {
-          return `${pathParts.join('/')}/${cleanedFileName}`;
-        }
-        return cleanedFileName;
-      }
-      return decoded.split('/').pop().replace('.png', '');
-    } catch {
-      return f.split('/').pop().replace('.png', '');
-    }
-  };
+
 
   const getConfigForFrame = useCallback((f) => {
     if (!f) return null;
