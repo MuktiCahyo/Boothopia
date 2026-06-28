@@ -11,13 +11,13 @@ const PHOTO_ASPECT = 4 / 3; // w:h landscape
 const slotHPercent = (w) => w / PHOTO_ASPECT / 3; // e.g. w=80 → 20%
 
 const defaultSlots = (count, w) => {
-  const h = slotHPercent(w);                              // slot height in %
+  const h = parseFloat(slotHPercent(w).toFixed(2));        // slot height in %
   const freeSpace = 100 - count * h;                      // remaining vertical %
   const gap = count > 1 ? freeSpace / (count + 1) : 0;     // distributed spacing
   const list = [];
   for (let i = 0; i < count; i++) {
     const y = count === 1 ? (100 - h) / 2 : gap + i * (h + gap);
-    list.push({ x: parseFloat(((100 - w) / 2).toFixed(2)), y: parseFloat(y.toFixed(2)), w, rotate: 0 });
+    list.push({ x: parseFloat(((100 - w) / 2).toFixed(2)), y: parseFloat(y.toFixed(2)), w, h, rotate: 0 });
   }
   return list;
 };
@@ -259,9 +259,10 @@ const WhatsNewEditor = () => {
 // ─── Draggable Slot on Frame Preview ─────────────────────────────────────────
 const COLORS = ['#6366f1', '#f97316', '#22c55e', '#ec4899'];
 
-const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, onChange }) => {
+const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, aspectRatioLocked, onChange }) => {
   const elRef = useRef(null);
   const col = COLORS[index % COLORS.length];
+  const slotH = slot.h || slotHPercent(slot.w);
 
   const startDrag = (e) => {
     if (e.target.dataset.handle) return;
@@ -273,8 +274,45 @@ const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, onChange }) 
     const sx = e.clientX, sy = e.clientY, ox = slot.x, oy = slot.y;
     const move = (ev) => {
       const nx = Math.max(0, Math.min(100 - slot.w, ox + (ev.clientX - sx) / rect.width * 100));
-      const ny = Math.max(0, Math.min(100 - slotHPercent(slot.w), oy + (ev.clientY - sy) / rect.height * 100));
+      const ny = Math.max(0, Math.min(100 - slotH, oy + (ev.clientY - sy) / rect.height * 100));
       onChange({ ...slot, x: parseFloat(nx.toFixed(2)), y: parseFloat(ny.toFixed(2)) });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  const startResize = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const ow = slot.w;
+    const oh = slot.h || slotHPercent(slot.w);
+    const initialAspect = ow / oh;
+
+    const move = (ev) => {
+      const dw = (ev.clientX - sx) / rect.width * 100;
+      let nw = Math.max(5, Math.min(100 - slot.x, ow + dw));
+      let nh;
+
+      if (aspectRatioLocked) {
+        nh = nw / initialAspect;
+        if (slot.y + nh > 100) {
+          nh = 100 - slot.y;
+          nw = nh * initialAspect;
+        }
+      } else {
+        const dh = (ev.clientY - sy) / rect.height * 100;
+        nh = Math.max(5, Math.min(100 - slot.y, oh + dh));
+      }
+
+      onChange({
+        ...slot,
+        w: parseFloat(nw.toFixed(2)),
+        h: parseFloat(nh.toFixed(2))
+      });
     };
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', move);
@@ -306,7 +344,7 @@ const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, onChange }) 
   return (
     <div ref={elRef} onMouseDown={startDrag}
       style={{
-        position: 'absolute', left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, aspectRatio: `${PHOTO_ASPECT}`,
+        position: 'absolute', left: `${slot.x}%`, top: `${slot.y}%`, width: `${slot.w}%`, height: `${slotH}%`,
         border: isSelected ? `3px solid white` : `3px solid ${col}`, background: `${col}55`, cursor: 'grab',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: 'white', fontWeight: 800, fontSize: 13, userSelect: 'none',
@@ -322,6 +360,9 @@ const SlotBox = ({ slot, index, containerRef, isSelected, onSelect, onChange }) 
       {/* Rotate handle — top right */}
       <div data-handle="r" onMouseDown={startRotate} title="Drag to rotate"
         style={handleStyle({ top: -10, right: -10, cursor: 'crosshair', borderRadius: '50%' })}>↻</div>
+      {/* Resize handle — bottom right */}
+      <div data-handle="s" onMouseDown={startResize} title="Drag to resize"
+        style={handleStyle({ bottom: -10, right: -10, cursor: 'nwse-resize', borderRadius: 4, background: '#f97316' })}>⤡</div>
     </div>
   );
 };
@@ -343,6 +384,7 @@ const FrameAdmin = ({ onExit }) => {
   const [selectedSlots, setSelectedSlots] = useState(new Set(['all']));
   const [previewBg, setPreviewBg] = useState('#888888');
   const [saved, setSaved] = useState(false);
+  const [aspectRatioLocked, setAspectRatioLocked] = useState(true);
   const containerRef = useRef(null);
   const fileInputRef = useRef(null);
   
@@ -588,13 +630,42 @@ const FrameAdmin = ({ onExit }) => {
   const handleWidthChange = useCallback((newVal) => {
     setWidth(newVal);
     if (slots.length === 0) return;
-    const updated = slots.map((s, i) =>
-      targetedIndices.includes(i)
-        ? { ...s, w: newVal, x: parseFloat(((100 - newVal) / 2).toFixed(2)) }
-        : s
-    );
+    const updated = slots.map((s, i) => {
+      if (targetedIndices.includes(i)) {
+        const oldH = s.h || slotHPercent(s.w);
+        const aspect = s.w / oldH;
+        const newH = aspectRatioLocked ? (newVal / aspect) : oldH;
+        return {
+          ...s,
+          w: newVal,
+          h: parseFloat(newH.toFixed(2)),
+          x: parseFloat(((100 - newVal) / 2).toFixed(2))
+        };
+      }
+      return s;
+    });
     setSlots(updated);
-  }, [slots, targetedIndices, setSlots]);
+  }, [slots, targetedIndices, aspectRatioLocked, setSlots]);
+
+  const handleHeightChange = useCallback((newVal) => {
+    if (slots.length === 0) return;
+    const updated = slots.map((s, i) => {
+      if (targetedIndices.includes(i)) {
+        const oldW = s.w;
+        const oldH = s.h || slotHPercent(s.w);
+        const aspect = oldW / oldH;
+        const newW = aspectRatioLocked ? (newVal * aspect) : oldW;
+        return {
+          ...s,
+          w: parseFloat(newW.toFixed(2)),
+          h: newVal,
+          x: parseFloat(((100 - newW) / 2).toFixed(2))
+        };
+      }
+      return s;
+    });
+    setSlots(updated);
+  }, [slots, targetedIndices, aspectRatioLocked, setSlots]);
 
   const handleRotateChange = useCallback((newVal) => {
     setRotate(newVal);
@@ -646,7 +717,7 @@ const FrameAdmin = ({ onExit }) => {
       const updated = slots.map((s, i) => {
         if (targetedIndices.includes(i)) {
           const nx = Math.max(0, Math.min(100 - s.w, s.x + dx));
-          const ny = Math.max(0, Math.min(100 - slotHPercent(s.w), s.y + dy));
+          const ny = Math.max(0, Math.min(100 - (s.h || slotHPercent(s.w)), s.y + dy));
           return { ...s, x: parseFloat(nx.toFixed(2)), y: parseFloat(ny.toFixed(2)) };
         }
         return s;
@@ -867,6 +938,7 @@ const FrameAdmin = ({ onExit }) => {
                     <SlotBox key={i} index={i} slot={slot} containerRef={containerRef}
                       isSelected={selectedSlots.has(i)}
                       onSelect={() => setSelectedSlots(new Set([i]))}
+                      aspectRatioLocked={aspectRatioLocked}
                       onChange={s => setSlots(slots.map((sl, si) => si === i ? s : sl))} />
                   ))}
                   {slots.length === 0 && (
@@ -928,6 +1000,29 @@ const FrameAdmin = ({ onExit }) => {
                   <input type="range" min="10" max="150" step="1" value={width} onChange={e => handleWidthChange(Number(e.target.value))} style={{ width: '100%' }} />
                 </div>
 
+                {/* Height */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.4rem' }}>
+                    Photo Height
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <input type="number" min="10" max="150" value={Math.round(slots[0]?.h || slotHPercent(width))}
+                        onChange={e => handleHeightChange(Math.min(150, Math.max(10, Number(e.target.value))))}
+                        style={{ width: 54, background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.3rem', color: 'white', padding: '0.2rem 0.4rem', fontSize: '0.8rem', textAlign: 'center' }} />
+                      <span style={{ color: '#52525b', fontSize: '0.8rem' }}>%</span>
+                    </div>
+                  </label>
+                  <input type="range" min="10" max="150" step="1" value={Math.round(slots[0]?.h || slotHPercent(width))} onChange={e => handleHeightChange(Number(e.target.value))} style={{ width: '100%' }} />
+                </div>
+
+                {/* Aspect Ratio Lock Checkbox */}
+                <div style={{ marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <input type="checkbox" id="aspectRatioLock" checked={aspectRatioLocked} onChange={e => setAspectRatioLocked(e.target.checked)}
+                    style={{ cursor: 'pointer' }} />
+                  <label htmlFor="aspectRatioLock" style={{ fontSize: '0.85rem', color: '#a1a1aa', cursor: 'pointer', userSelect: 'none' }}>
+                    Lock Aspect Ratio (Keep proportions)
+                  </label>
+                </div>
+
                 {/* Rotate */}
                 <div style={{ marginBottom: '1.25rem' }}>
                   <label style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', color: '#a1a1aa', marginBottom: '0.4rem' }}>
@@ -967,17 +1062,18 @@ const FrameAdmin = ({ onExit }) => {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
                           <span style={{ color: COLORS[i % 4], fontWeight: 700, fontSize: '0.85rem', minWidth: 24 }}>P{i + 1}</span>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '0.35rem' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: '0.35rem' }}>
                           {[
                             { label: 'X %', field: 'x', min: 0, max: 100 },
                             { label: 'Y %', field: 'y', min: 0, max: 100 },
                             { label: 'W %', field: 'w', min: 10, max: 150 },
+                            { label: 'H %', field: 'h', min: 10, max: 150, fallback: (w) => slotHPercent(w) },
                             { label: 'R °', field: 'rotate', min: -180, max: 180 },
-                          ].map(({ label: lbl, field, min, max }) => (
+                          ].map(({ label: lbl, field, min, max, fallback }) => (
                             <div key={field}>
                               <div style={{ fontSize: '0.65rem', color: '#52525b', marginBottom: '0.15rem', textTransform: 'uppercase' }}>{lbl}</div>
                               <input type="number" min={min} max={max} step="0.1"
-                                value={parseFloat((s[field] || 0).toFixed(1))}
+                                value={parseFloat((s[field] !== undefined ? s[field] : (fallback ? fallback(s.w) : 0)).toFixed(1))}
                                 onChange={e => updateSlotField(i, field, e.target.value)}
                                 style={{ width: '100%', background: 'rgba(255,255,255,0.07)', border: `1px solid ${COLORS[i % 4]}44`, borderRadius: '0.3rem', color: 'white', padding: '0.25rem 0.35rem', fontSize: '0.78rem', textAlign: 'center', boxSizing: 'border-box' }} />
                             </div>

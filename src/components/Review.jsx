@@ -58,9 +58,8 @@ const FilteredPhoto = ({ src, filters, roundness, aspectRatio = 4/3 }) => {
 };
 
 // Free-form draggable photo used when a frame is active
-const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, transform, onChange, isSelected, onSelect, isDownloading }) => {
+const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, slot, transform, onChange, isSelected, onSelect, isDownloading }) => {
   const [bakedSrc, setBakedSrc] = useState(src);
-  const elRef = useRef(null);
 
   useEffect(() => {
     let active = true;
@@ -83,83 +82,89 @@ const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, transform,
     return () => { active = false; };
   }, [src, filters, aspectRatio]);
 
-  const { x, y, w, rotate } = transform;
-
   const startDrag = (e) => {
-    if (e.target.dataset.handle) return;
     e.preventDefault();
     onSelect();
-    const parent = elRef.current?.parentElement;
-    if (!parent) return;
-    const pw = parent.offsetWidth;
-    const ph = parent.offsetHeight;
-    const sx = e.clientX, sy = e.clientY, ox = x, oy = y;
-    const onMove = (ev) => onChange({ ...transform, x: ox + ((ev.clientX - sx) / pw * 100), y: oy + ((ev.clientY - sy) / ph * 100) });
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
+    const sx = e.clientX, sy = e.clientY;
+    const ox = transform.x || 0, oy = transform.y || 0;
+    
+    const move = (ev) => {
+      const dx = ev.clientX - sx;
+      const dy = ev.clientY - sy;
+      onChange({
+        ...transform,
+        x: ox + dx,
+        y: oy + dy
+      });
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
   };
 
-  const startResize = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    const parent = elRef.current?.parentElement;
-    if (!parent) return;
-    const pw = parent.offsetWidth;
-    const sx = e.clientX, ow = w;
-    const onMove = (ev) => onChange({ ...transform, w: Math.max(5, ow + ((ev.clientX - sx) / pw * 100)) });
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const startRotate = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    const rect = elRef.current.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-    const onMove = (ev) => onChange({ ...transform, rotate: Math.atan2(ev.clientY - cy, ev.clientX - cx) * (180 / Math.PI) + 90 });
-    const onUp = () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const dot = (extra) => ({
-    position: 'absolute', zIndex: 50, cursor: 'pointer',
-    display: isSelected && !isDownloading ? 'flex' : 'none',
-    alignItems: 'center', justifyContent: 'center',
-    fontSize: 10, fontWeight: 700, color: 'white',
-    userSelect: 'none', ...extra
-  });
-
-  // Snap to horizontal center of the strip container
-  const snapCenter = (e) => {
+  const handleWheel = (e) => {
     e.preventDefault();
-    onChange({ ...transform, x: (100 - w) / 2 });
+    const delta = -e.deltaY * 0.001;
+    const newScale = Math.min(3.0, Math.max(1.0, (transform.scale || 1.0) + delta));
+    onChange({
+      ...transform,
+      scale: parseFloat(newScale.toFixed(2))
+    });
   };
+
+  const slotHPercent = (w) => w / (4 / 3) / 3;
+  const slotH = slot.h || slotHPercent(slot.w);
 
   return (
-    <div ref={elRef} data-photo="true" onMouseDown={startDrag} onClick={onSelect} onDoubleClick={snapCenter}
+    <div
+      onMouseDown={startDrag}
+      onWheel={handleWheel}
+      onClick={onSelect}
       style={{
-        position: 'absolute', left: `${x}%`, top: `${y}%`, width: `${w}%`, aspectRatio: `${aspectRatio}`,
-        transform: `rotate(${rotate}deg)`, cursor: 'move', userSelect: 'none',
-        outline: isSelected && !isDownloading ? '2px dashed #6366f1' : 'none',
-        outlineOffset: 2,
-        // Selected: pop above frame + multiply blend to composite with cutouts
-        // Unselected: sit silently behind the frame
-        zIndex: isSelected ? 25 : 15,
-        mixBlendMode: isSelected ? 'multiply' : 'normal',
-        borderRadius: `${roundness}rem`, overflow: 'hidden',
+        position: 'absolute',
+        left: `${slot.x}%`,
+        top: `${slot.y}%`,
+        width: `${slot.w}%`,
+        height: `${slotH}%`,
+        transform: `rotate(${slot.rotate || 0}deg)`,
+        overflow: 'hidden',
+        borderRadius: `${roundness}rem`,
+        boxSizing: 'border-box',
+        cursor: 'move',
+        userSelect: 'none',
+        zIndex: 15,
+        outline: isSelected && !isDownloading ? '3px solid #6366f1' : 'none',
+        outlineOffset: isSelected ? -3 : 0,
+        boxShadow: isSelected && !isDownloading ? '0 0 12px rgba(99,102,241,0.5)' : 'none',
       }}
     >
-      <img src={bakedSrc} alt="shot" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', pointerEvents: 'none' }} />
-      {/* Rotate handle — blue circle, TOP RIGHT corner */}
-      <div data-handle="r" onMouseDown={startRotate} title="Rotate"
-        style={dot({ top: -10, right: -10, width: 22, height: 22, background: '#3b82f6', border: '2px solid white', borderRadius: '50%' })}>↻</div>
-      {/* Resize handle — orange square, BOTTOM RIGHT corner */}
-      <div data-handle="s" onMouseDown={startResize} title="Resize"
-        style={dot({ bottom: -10, right: -10, width: 22, height: 22, background: '#f97316', border: '2px solid white', borderRadius: 4 })}>⤡</div>
-      {/* Snap hint */}
+      <img
+        src={bakedSrc}
+        alt="photo slot"
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          pointerEvents: 'none',
+          transform: `translate(${transform.x || 0}px, ${transform.y || 0}px) scale(${transform.scale || 1.0}) rotate(${transform.rotate || 0}deg)`,
+        }}
+      />
       {isSelected && !isDownloading && (
-        <div style={{ position: 'absolute', bottom: -22, left: '50%', transform: 'translateX(-50%)', fontSize: 9, color: '#a1a1aa', whiteSpace: 'nowrap', pointerEvents: 'none' }}>dbl-click to center</div>
+        <div style={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          background: 'rgba(99,102,241,0.85)',
+          color: 'white',
+          padding: '0.15rem 0.35rem',
+          borderRadius: '0.25rem',
+          fontSize: '0.65rem',
+          fontWeight: 700,
+          pointerEvents: 'none',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+        }}>
+          Selected
+        </div>
       )}
     </div>
   );
@@ -270,16 +275,13 @@ const Review = ({ photos, onRetake, onHome }) => {
       const slotConfig = frameConfigs[selectedFrame]?.slots;
 
       if (slotConfig && slotConfig.length > 0) {
-        // ✨ AUTO-FIT: place photos precisely using saved slot config
-        const transforms = photos.map((_, i) => {
-          const slot = slotConfig[i % slotConfig.length];
-          return {
-            x: slot.x,
-            y: slot.y,
-            w: slot.w,
-            rotate: slot.rotate || 0,
-          };
-        });
+        // Initialize default pan & zoom offsets for each photo slot
+        const transforms = photos.map(() => ({
+          scale: 1.0,
+          x: 0,
+          y: 0,
+          rotate: 0,
+        }));
         setPhotoTransforms(transforms);
       } else {
         // Fallback: evenly distribute manually (pure percentages)
@@ -503,22 +505,27 @@ const Review = ({ photos, onRetake, onHome }) => {
           >
             {/* Frame mode: each photo is independently draggable/resizable/rotatable */}
             {selectedFrame ? (
-              photos.map((p, idx) => (
-                photoTransforms[idx] ? (
-                  <DraggablePhoto
-                    key={idx}
-                    src={p}
-                    filters={cssFilters}
-                    roundness={roundness}
-                    aspectRatio={Number(photoAspect)}
-                    transform={photoTransforms[idx]}
-                    isSelected={selectedPhotoIdx === idx}
-                    isDownloading={isDownloading}
-                    onSelect={() => setSelectedPhotoIdx(idx)}
-                    onChange={(t) => setPhotoTransforms(prev => prev.map((pt, i) => i === idx ? t : pt))}
-                  />
-                ) : null
-              ))
+              photos.map((p, idx) => {
+                const slotConfig = frameConfigs[selectedFrame]?.slots;
+                const slot = slotConfig ? slotConfig[idx % slotConfig.length] : null;
+                return (
+                  slot && photoTransforms[idx] ? (
+                    <DraggablePhoto
+                      key={idx}
+                      src={p}
+                      filters={cssFilters}
+                      roundness={roundness}
+                      aspectRatio={Number(photoAspect)}
+                      slot={slot}
+                      transform={photoTransforms[idx]}
+                      isSelected={selectedPhotoIdx === idx}
+                      isDownloading={isDownloading}
+                      onSelect={() => setSelectedPhotoIdx(idx)}
+                      onChange={(t) => setPhotoTransforms(prev => prev.map((pt, i) => i === idx ? t : pt))}
+                    />
+                  ) : null
+                );
+              })
             ) : (
               /* Normal grid layout when no frame */
               <div style={{
@@ -600,6 +607,84 @@ const Review = ({ photos, onRetake, onHome }) => {
 
           {/* Scrollable Content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '1.5rem', minHeight: 0 }}>
+            
+            {/* If a photo is selected, show its adjustments at the top of the sidebar */}
+            {selectedFrame && selectedPhotoIdx !== null && photoTransforms[selectedPhotoIdx] && (
+              <div style={{
+                background: 'rgba(99,102,241,0.08)',
+                border: '1px solid rgba(99,102,241,0.15)',
+                borderRadius: '0.5rem',
+                padding: '1rem',
+                marginBottom: '1.5rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#a5b4fc', fontWeight: 700 }}>
+                    Adjust Photo P{selectedPhotoIdx + 1}
+                  </h4>
+                  <button 
+                    onClick={() => {
+                      setPhotoTransforms(prev => prev.map((pt, i) => i === selectedPhotoIdx ? { scale: 1.0, x: 0, y: 0, rotate: 0 } : pt));
+                    }}
+                    style={{
+                      background: 'rgba(239,68,68,0.1)',
+                      border: '1px solid rgba(239,68,68,0.2)',
+                      borderRadius: '0.3rem',
+                      color: '#ef4444',
+                      padding: '0.2rem 0.5rem',
+                      fontSize: '0.7rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Reset Photo
+                  </button>
+                </div>
+                
+                <p style={{ fontSize: '0.75rem', color: '#a1a1aa', margin: '0 0 0.85rem' }}>
+                  💡 Geser foto langsung di dalam bingkai untuk mengatur posisinya.
+                </p>
+
+                {/* Zoom slider */}
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.35rem' }}>
+                    <span>Zoom</span>
+                    <span style={{ color: 'white', fontWeight: 600 }}>{Math.round((photoTransforms[selectedPhotoIdx].scale || 1.0) * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="1.0"
+                    max="2.5"
+                    step="0.02"
+                    value={photoTransforms[selectedPhotoIdx].scale || 1.0}
+                    onChange={(e) => {
+                      const newScale = parseFloat(e.target.value);
+                      setPhotoTransforms(prev => prev.map((pt, i) => i === selectedPhotoIdx ? { ...pt, scale: newScale } : pt));
+                    }}
+                    style={{ width: '100%', accentColor: '#6366f1' }}
+                  />
+                </div>
+
+                {/* Rotate slider */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: '#a1a1aa', marginBottom: '0.35rem' }}>
+                    <span>Rotation</span>
+                    <span style={{ color: 'white', fontWeight: 600 }}>{Math.round(photoTransforms[selectedPhotoIdx].rotate || 0)}°</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-45"
+                    max="45"
+                    step="1"
+                    value={photoTransforms[selectedPhotoIdx].rotate || 0}
+                    onChange={(e) => {
+                      const newRotate = parseInt(e.target.value);
+                      setPhotoTransforms(prev => prev.map((pt, i) => i === selectedPhotoIdx ? { ...pt, rotate: newRotate } : pt));
+                    }}
+                    style={{ width: '100%', accentColor: '#6366f1' }}
+                  />
+                </div>
+              </div>
+            )}
             
             {activeTab === 'options' && (
               <>
@@ -704,7 +789,7 @@ const Review = ({ photos, onRetake, onHome }) => {
             {activeTab === 'frames' && (
               <div style={{ marginBottom: '2rem' }}>
                 <div style={{ fontSize: '0.8rem', color: '#6366f1', background: 'rgba(99,102,241,0.1)', borderRadius: '0.4rem', padding: '0.6rem 0.75rem', marginBottom: '0.75rem' }}>
-                  💡 Drag photos to align with holes. <span style={{color:'#3b82f6', fontWeight:700}}>🔵 Blue circle</span> = Rotate. <span style={{color:'#f97316', fontWeight:700}}>🟠 Orange square</span> = Resize. Double-click a photo to snap it to center.
+                  💡 Klik salah satu foto untuk mengaktifkannya. Anda dapat **menggeser langsung** fotonya atau gunakan slider **Zoom/Rotation** di sebelah kanan. Gunakan scroll wheel mouse untuk zoom cepat.
                 </div>
                 {/* Removed auto-fit status messages as requested */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
