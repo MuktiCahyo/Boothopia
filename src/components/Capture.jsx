@@ -100,8 +100,8 @@ const Capture = ({ onComplete, onCancel }) => {
         const mediaDevices = await navigator.mediaDevices.enumerateDevices();
         const videoInputs = mediaDevices.filter(d => d.kind === 'videoinput');
         setDevices(videoInputs);
-        if (videoInputs.length > 0 && !selectedDevice) {
-           setSelectedDevice(videoInputs[0].deviceId);
+        if (videoInputs.length > 0) {
+          setSelectedDevice(prev => prev || videoInputs[0].deviceId);
         }
       } catch (err) {
         console.error("Could not enumerate devices", err);
@@ -140,7 +140,7 @@ const Capture = ({ onComplete, onCancel }) => {
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
-      } catch (err) {
+      } catch {
         if (active) setError('Could not access camera. Please allow permissions.');
       }
     };
@@ -202,10 +202,16 @@ const Capture = ({ onComplete, onCancel }) => {
   useEffect(() => {
     if (status === 'countdown') {
       if (countdown > 0) {
-        const timer = setTimeout(() => setCountdown(c => c - 1), 1000);
+        const timer = setTimeout(() => {
+          setCountdown(c => {
+            if (c <= 1) {
+              setTimeout(() => setStatus('flash'), 0);
+              return 0;
+            }
+            return c - 1;
+          });
+        }, 1000);
         return () => clearTimeout(timer);
-      } else {
-        setStatus('flash');
       }
     } else if (status === 'flash') {
       const photo = takePhoto();
@@ -216,7 +222,7 @@ const Capture = ({ onComplete, onCancel }) => {
       }, 150);
       return () => clearTimeout(flashTimer);
     }
-  }, [status, countdown, takePhoto, delaySecs, shotsCount, onComplete, captureMode]);
+  }, [status, countdown, takePhoto]);
 
   const handleRetake = () => {
     setPendingPhoto(null);
@@ -251,13 +257,22 @@ const Capture = ({ onComplete, onCancel }) => {
   useEffect(() => {
     if (status === 'preview-decision') {
       if (decisionCountdown > 0) {
-        const timer = setTimeout(() => setDecisionCountdown(c => c - 1), 1000);
+        const timer = setTimeout(() => {
+          setDecisionCountdown(c => {
+            if (c <= 1) {
+              setTimeout(() => handleAccept(), 0);
+              return 0;
+            }
+            return c - 1;
+          });
+        }, 1000);
         return () => clearTimeout(timer);
-      } else {
-        handleAccept();
       }
     } else {
-      setDecisionCountdown(5);
+      if (decisionCountdown !== 5) {
+        const timer = setTimeout(() => setDecisionCountdown(5), 0);
+        return () => clearTimeout(timer);
+      }
     }
   }, [status, decisionCountdown, handleAccept]);
 

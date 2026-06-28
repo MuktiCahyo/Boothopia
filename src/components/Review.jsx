@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Download, RefreshCcw, Home as HomeIcon, Palette, Upload, Sliders, Type } from 'lucide-react';
+import { Download, RefreshCcw, Home as HomeIcon, Palette, Upload, Sliders, Type, Share2 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { loadConfigs } from '../utils/configLoader';
+import { supabase } from '../utils/supabaseClient';
 
 const FilteredPhoto = ({ src, filters, roundness, aspectRatio = 4/3 }) => {
   const [dataUrl, setDataUrl] = useState(src);
@@ -41,7 +42,7 @@ const FilteredPhoto = ({ src, filters, roundness, aspectRatio = 4/3 }) => {
     img.src = src;
     
     return () => { active = false; };
-  }, [src, filters]);
+  }, [src, filters, aspectRatio]);
 
   return (
     <div style={{ 
@@ -121,7 +122,7 @@ const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, transform,
     window.addEventListener('mouseup', onUp);
   };
 
-  const dot = (extra, label) => ({
+  const dot = (extra) => ({
     position: 'absolute', zIndex: 50, cursor: 'pointer',
     display: isSelected && !isDownloading ? 'flex' : 'none',
     alignItems: 'center', justifyContent: 'center',
@@ -164,7 +165,7 @@ const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, transform,
   );
 };
 
-const FRAMES = [
+const STATIC_FRAMES = [
   null,
   ...[1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25].map(n => `/frame/Template vol 6 20k/Trip - ${n}.png`)
 ];
@@ -185,8 +186,7 @@ const PRESET_BGS = [
 const Review = ({ photos, onRetake, onHome }) => {
   const stripRef = useRef(null);
   const fileInputRef = useRef(null);
-  const bgColorRef = useRef(null);
-  const fontColorRef = useRef(null);
+
   
   // Customization State
   const [bgColor, setBgColor] = useState('#ffffff');
@@ -197,13 +197,37 @@ const Review = ({ photos, onRetake, onHome }) => {
   const [paddingY, setPaddingY] = useState('2');
   const [roundness, setRoundness] = useState('0.5');
   const [photoGap, setPhotoGap] = useState('0.75');
-  const [photoAspect, setPhotoAspect] = useState('1.33');
+  const photoAspect = 1.33;
   const [selectedFrame, setSelectedFrame] = useState(null);
   const [photoTransforms, setPhotoTransforms] = useState([]);
   const [selectedPhotoIdx, setSelectedPhotoIdx] = useState(null);
   const [frameConfigs, setFrameConfigs] = useState({});
-  const [autoFitApplied, setAutoFitApplied] = useState(false);
   const [stripWidth, setStripWidth] = useState(300);
+
+  // Supabase dynamic frames
+  const [dbFrames, setDbFrames] = useState([]);
+  const [canShare] = useState(() => !!(typeof navigator !== 'undefined' && navigator.share && navigator.canShare));
+
+  // Fetch dynamic frames on mount
+  useEffect(() => {
+    const fetchDynamicFrames = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('frames')
+          .select('image_url')
+          .order('created_at', { ascending: true });
+        
+        if (!error && data) {
+          setDbFrames(data.map(f => f.image_url));
+        }
+      } catch (err) {
+        console.error('Failed to fetch dynamic frames:', err);
+      }
+    };
+    fetchDynamicFrames();
+  }, []);
+
+  const allFrames = [...STATIC_FRAMES, ...dbFrames];
 
   // Track strip width for dynamic layout scaling (especially on mobile)
   useEffect(() => {
@@ -228,7 +252,13 @@ const Review = ({ photos, onRetake, onHome }) => {
 
   // Initialize transforms whenever frame is selected or photo count changes
   useEffect(() => {
-    if (!selectedFrame) { setPhotoTransforms([]); setAutoFitApplied(false); return; }
+    if (!selectedFrame) {
+      if (photoTransforms.length > 0) {
+        const timer = setTimeout(() => setPhotoTransforms([]), 0);
+        return () => clearTimeout(timer);
+      }
+      return;
+    }
 
     const applyTransforms = () => {
       const container = stripRef.current;
@@ -251,11 +281,10 @@ const Review = ({ photos, onRetake, onHome }) => {
           };
         });
         setPhotoTransforms(transforms);
-        setAutoFitApplied(true);
       } else {
         // Fallback: evenly distribute manually (pure percentages)
         const photoW = 75; // 75%
-        const photoH_pct_w = photoW / Number(photoAspect);
+        const photoH_pct_w = photoW / photoAspect;
         const parentAspect = photos.length === 6 ? 2/3 : 1/3;
         const photoH_pct_h = photoH_pct_w * parentAspect;
         
@@ -269,7 +298,6 @@ const Review = ({ photos, onRetake, onHome }) => {
           rotate: 0,
         }));
         setPhotoTransforms(transforms);
-        setAutoFitApplied(false);
       }
       setSelectedPhotoIdx(null);
     };
@@ -277,7 +305,7 @@ const Review = ({ photos, onRetake, onHome }) => {
     // Use rAF to wait for CSS layout to settle before reading px dimensions
     const raf = requestAnimationFrame(applyTransforms);
     return () => cancelAnimationFrame(raf);
-  }, [selectedFrame, photos.length, frameConfigs]);
+  }, [selectedFrame, photos, frameConfigs, photoTransforms.length]);
 
   // Filter Intensities (0-100)
   const [grayscaleInt, setGrayscaleInt] = useState(0);
@@ -317,6 +345,58 @@ const Review = ({ photos, onRetake, onHome }) => {
     }
   };
 
+  const handleShare = async () => {
+    if (!stripRef.current || isDownloading) return;
+    setIsDownloading(true);
+    
+    try {
+      const currentWidth = stripRef.current.offsetWidth;
+      let exportScale = 1200 / currentWidth;
+      if (exportScale < 3) exportScale = 3;
+
+      const canvas = await html2canvas(stripRef.current, {
+        scale: exportScale,
+        useCORS: true,
+        backgroundColor: bgColor,
+      });
+      
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          console.error("Canvas is empty");
+          setIsDownloading(false);
+          return;
+        }
+
+        const file = new File([blob], `photobooth-${Date.now()}.png`, { type: 'image/png' });
+        
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+          try {
+            await navigator.share({
+              files: [file],
+              title: 'My Photo Strip',
+              text: 'Look at my photo strip from Boothopia!',
+            });
+          } catch (shareErr) {
+            console.log('Share action closed/cancelled:', shareErr);
+          }
+        } else {
+          alert('Sharing is not supported on this device. Standard download will start.');
+          const localUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.download = file.name;
+          link.href = localUrl;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+        setIsDownloading(false);
+      }, 'image/png', 1.0);
+    } catch (err) {
+      console.error('Failed to share strip:', err);
+      setIsDownloading(false);
+    }
+  };
+
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -350,15 +430,19 @@ const Review = ({ photos, onRetake, onHome }) => {
           setIsDownloading(false);
           return;
         }
-        const url = URL.createObjectURL(blob);
+
+        // Standard browser download trigger (runs immediately for better UX)
+        const localUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.download = `photobooth-${Date.now()}.png`;
-        link.href = url;
+        link.href = localUrl;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(localUrl);
+
         setIsDownloading(false);
+        alert('HD strip downloaded successfully!');
       }, 'image/png', 1.0);
     } catch (err) {
       console.error('Failed to capture strip:', err);
@@ -624,7 +708,7 @@ const Review = ({ photos, onRetake, onHome }) => {
                 </div>
                 {/* Removed auto-fit status messages as requested */}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem' }}>
-                  {FRAMES.map((fr, i) => (
+                  {allFrames.map((fr, i) => (
                     <div 
                       key={i}
                       onClick={() => setSelectedFrame(fr)}
@@ -708,6 +792,13 @@ const Review = ({ photos, onRetake, onHome }) => {
               {isDownloading ? 'Saving...' : 'Download HD Strip'}
               {!isDownloading && <Download size={18} />}
             </button>
+            {canShare && (
+              <button className="btn btn-secondary" 
+                style={{ width: '100%', padding: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#a5b4fc' }} 
+                onClick={handleShare} disabled={isDownloading}>
+                <Share2 size={16} /> Share Photo Strip
+              </button>
+            )}
             <button className="btn btn-secondary" style={{ width: '100%', padding: '0.75rem' }} onClick={onRetake}>
               <RefreshCcw size={16} /> Retake Photos
             </button>

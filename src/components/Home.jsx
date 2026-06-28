@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Sparkles, Star, Zap, Check, X, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Camera, Sparkles, Star, Zap, ChevronRight } from 'lucide-react';
+import { supabase } from '../utils/supabaseClient';
 
 // ── Editable What's New entry (stored in localStorage) ──────────────────────
 const LS_NEWS_KEY = 'boothopia_whats_new';
-const ADMIN_PIN = '240820';
 
 const DEFAULT_NEWS = [
   { id: 1, icon: '✨', text: 'HD photo capture with camera support' },
@@ -11,20 +11,14 @@ const DEFAULT_NEWS = [
   { id: 3, icon: '🎨', text: 'Film grain, lens flare & vintage filters added' },
 ];
 
-function loadNews() {
-  try {
-    const d = JSON.parse(localStorage.getItem(LS_NEWS_KEY));
-    return Array.isArray(d) && d.length > 0 ? d : DEFAULT_NEWS;
-  } catch { return DEFAULT_NEWS; }
-}
-
 // ── Floating orb ─────────────────────────────────────────────────────────────
 function FloatingOrb({ style }) {
   return <div style={{ position: 'absolute', borderRadius: '50%', filter: 'blur(60px)', pointerEvents: 'none', ...style }} />;
 }
 
 // ── Feature badge ────────────────────────────────────────────────────────────
-function FeatureBadge({ icon: Icon, label, delay = 0 }) {
+function FeatureBadge({ icon, label, delay = 0 }) {
+  const IconComponent = icon;
   return (
     <div
       className="animate-fade-in"
@@ -40,62 +34,38 @@ function FeatureBadge({ icon: Icon, label, delay = 0 }) {
         backdropFilter: 'blur(8px)',
       }}
     >
-      <Icon size={13} style={{ color: '#818cf8' }} />
+      <IconComponent size={13} style={{ color: '#818cf8' }} />
       {label}
     </div>
   );
 }
 
-// ── What's New panel ─────────────────────────────────────────────────────────
+// ── What's New panel (Read-Only) ─────────────────────────────────────────────
 function WhatsNew() {
-  const [items, setItems] = useState(loadNews);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState([]);
-  const [newText, setNewText] = useState('');
-  const [newIcon, setNewIcon] = useState('🆕');
-  const [pinPrompt, setPinPrompt] = useState(false);
-  const [pinValue, setPinValue] = useState('');
-  const [pinError, setPinError] = useState(false);
+  const [items, setItems] = useState([]);
 
-  // Triple-click on the title to open the hidden admin PIN prompt
-  const clickCountRef = useRef(0);
-  const clickTimerRef = useRef(null);
-  const handleTitleClick = () => {
-    clickCountRef.current += 1;
-    clearTimeout(clickTimerRef.current);
-    clickTimerRef.current = setTimeout(() => { clickCountRef.current = 0; }, 600);
-    if (clickCountRef.current >= 3) {
-      clickCountRef.current = 0;
-      setPinPrompt(true); setPinValue(''); setPinError(false);
-    }
-  };
-
-  const submitPin = () => {
-    if (pinValue === ADMIN_PIN) {
-      setPinPrompt(false);
-      setDraft(items.map(i => ({ ...i })));
-      setEditing(true);
-    } else {
-      setPinError(true);
-      setPinValue('');
-      setTimeout(() => setPinError(false), 1400);
-    }
-  };
-  const cancelPin = () => { setPinPrompt(false); setPinValue(''); };
-  const cancelEdit = () => setEditing(false);
-  const saveEdit = () => {
-    setItems(draft);
-    localStorage.setItem(LS_NEWS_KEY, JSON.stringify(draft));
-    setEditing(false);
-  };
-  const updateDraft = (id, field, val) =>
-    setDraft(d => d.map(i => i.id === id ? { ...i, [field]: val } : i));
-  const removeDraft = (id) => setDraft(d => d.filter(i => i.id !== id));
-  const addItem = () => {
-    if (!newText.trim()) return;
-    setDraft(d => [...d, { id: Date.now(), icon: newIcon, text: newText.trim() }]);
-    setNewText(''); setNewIcon('🆕');
-  };
+  // Fetch news from Supabase on mount
+  useEffect(() => {
+    const fetchNews = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('whats_new')
+          .select('id, icon, text')
+          .order('id', { ascending: true });
+        
+        if (!error && data && data.length > 0) {
+          setItems(data);
+        } else {
+          const localNews = JSON.parse(localStorage.getItem(LS_NEWS_KEY));
+          setItems(Array.isArray(localNews) && localNews.length > 0 ? localNews : DEFAULT_NEWS);
+        }
+      } catch {
+        const localNews = JSON.parse(localStorage.getItem(LS_NEWS_KEY));
+        setItems(Array.isArray(localNews) && localNews.length > 0 ? localNews : DEFAULT_NEWS);
+      }
+    };
+    fetchNews();
+  }, []);
 
   return (
     <div
@@ -113,11 +83,7 @@ function WhatsNew() {
     >
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        {/* Triple-click on this title to reveal admin edit */}
-        <div
-          onClick={handleTitleClick}
-          style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'default', userSelect: 'none' }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'default', userSelect: 'none' }}>
           <Zap size={15} style={{ color: '#f59e0b' }} />
           <span style={{ fontWeight: 700, fontSize: '0.85rem', color: '#fafafa', fontFamily: 'Outfit' }}>
             What's New
@@ -130,95 +96,17 @@ function WhatsNew() {
             LATEST
           </span>
         </div>
-
-        {/* Inline PIN prompt — only appears after triple-click */}
-        {pinPrompt && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-            <input
-              autoFocus
-              type="password"
-              maxLength={8}
-              value={pinValue}
-              onChange={e => setPinValue(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') submitPin(); if (e.key === 'Escape') cancelPin(); }}
-              placeholder="PIN"
-              style={{
-                width: 70, padding: '0.25rem 0.5rem',
-                background: pinError ? 'rgba(239,68,68,0.15)' : 'rgba(255,255,255,0.07)',
-                border: `1px solid ${pinError ? '#ef4444' : 'rgba(255,255,255,0.2)'}`,
-                borderRadius: '0.35rem', color: 'white',
-                fontSize: '0.8rem', textAlign: 'center', letterSpacing: '0.2em',
-                transition: 'border-color 0.2s',
-              }}
-            />
-            <button onClick={submitPin} style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '0.35rem', color: '#818cf8', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', fontWeight: 700 }}>OK</button>
-            <button onClick={cancelPin} style={{ background: 'none', border: 'none', color: '#52525b', cursor: 'pointer', display: 'flex', padding: '0.2rem' }}><X size={14} /></button>
-          </div>
-        )}
-
-        {/* Save/Cancel only appear in edit mode */}
-        {editing && !pinPrompt && (
-          <div style={{ display: 'flex', gap: '0.35rem' }}>
-            <button onClick={saveEdit} style={{ background: 'rgba(34,197,94,0.15)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '0.35rem', color: '#22c55e', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <Check size={12} /> Save
-            </button>
-            <button onClick={cancelEdit} style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '0.35rem', color: '#ef4444', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-              <X size={12} /> Cancel
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Items */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-        {(!editing ? items : draft).map((item) => (
+        {items.map((item) => (
           <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {editing ? (
-              <>
-                <input
-                  value={item.icon}
-                  onChange={e => updateDraft(item.id, 'icon', e.target.value)}
-                  style={{ width: 36, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.3rem', color: 'white', padding: '0.2rem', textAlign: 'center', fontSize: '1rem' }}
-                />
-                <input
-                  value={item.text}
-                  onChange={e => updateDraft(item.id, 'text', e.target.value)}
-                  style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '0.3rem', color: 'white', padding: '0.3rem 0.5rem', fontSize: '0.82rem' }}
-                />
-                <button onClick={() => removeDraft(item.id)} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: '0.2rem', display: 'flex' }}>
-                  <X size={14} />
-                </button>
-              </>
-            ) : (
-              <>
-                <span style={{ fontSize: '1rem', flexShrink: 0 }}>{item.icon}</span>
-                <span style={{ fontSize: '0.83rem', color: '#d4d4d8', lineHeight: 1.5 }}>{item.text}</span>
-                <ChevronRight size={13} style={{ color: '#52525b', flexShrink: 0, marginLeft: 'auto' }} />
-              </>
-            )}
+            <span style={{ fontSize: '1rem', flexShrink: 0 }}>{item.icon}</span>
+            <span style={{ fontSize: '0.83rem', color: '#d4d4d8', lineHeight: 1.5 }}>{item.text}</span>
+            <ChevronRight size={13} style={{ color: '#52525b', flexShrink: 0, marginLeft: 'auto' }} />
           </div>
         ))}
-
-        {/* Add new item in edit mode */}
-        {editing && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-            <input
-              value={newIcon}
-              onChange={e => setNewIcon(e.target.value)}
-              style={{ width: 36, background: 'rgba(255,255,255,0.07)', border: '1px dashed rgba(255,255,255,0.2)', borderRadius: '0.3rem', color: 'white', padding: '0.2rem', textAlign: 'center', fontSize: '1rem' }}
-            />
-            <input
-              value={newText}
-              onChange={e => setNewText(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addItem()}
-              placeholder="Add announcement..."
-              style={{ flex: 1, background: 'rgba(255,255,255,0.07)', border: '1px dashed rgba(255,255,255,0.2)', borderRadius: '0.3rem', color: 'white', padding: '0.3rem 0.5rem', fontSize: '0.82rem' }}
-            />
-            <button onClick={addItem} style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: '0.35rem', color: '#818cf8', cursor: 'pointer', padding: '0.25rem 0.6rem', fontSize: '0.75rem', fontWeight: 700 }}>
-              + Add
-            </button>
-          </div>
-        )}
       </div>
     </div>
   );
@@ -227,15 +115,6 @@ function WhatsNew() {
 // ── Main Home component ──────────────────────────────────────────────────────
 const Home = ({ onStart }) => {
   const [hovered, setHovered] = useState(false);
-  const [time, setTime] = useState(new Date());
-
-  useEffect(() => {
-    const t = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const dateStr = time.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '2rem 1rem 1.5rem', position: 'relative', overflow: 'hidden' }}>
