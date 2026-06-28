@@ -335,6 +335,7 @@ const FrameAdmin = ({ onExit }) => {
   const [dbFrames, setDbFrames] = useState([]);
   const [uploadingFrame, setUploadingFrame] = useState(false);
   const uploadFileInputRef = useRef(null);
+  const uploadFolderInputRef = useRef(null);
 
   const [count, setCount] = useState(3);
   const [width, setWidth] = useState(78);
@@ -349,6 +350,17 @@ const FrameAdmin = ({ onExit }) => {
     if (!f) return '';
     try {
       const decoded = decodeURIComponent(f);
+      const parts = decoded.split('/storage/v1/object/public/frames/');
+      if (parts.length === 2) {
+        const path = parts[1];
+        const pathParts = path.split('/');
+        const fileName = pathParts.pop();
+        const cleanedFileName = fileName.replace(/^\d+-[a-z0-9]+-/, '').replace('.png', '');
+        if (pathParts.length > 0) {
+          return `${pathParts.join('/')}/${cleanedFileName}`;
+        }
+        return cleanedFileName;
+      }
       return decoded.split('/').pop().replace('.png', '');
     } catch {
       return f.split('/').pop().replace('.png', '');
@@ -461,6 +473,85 @@ const FrameAdmin = ({ onExit }) => {
       }
     } catch (err) {
       alert(`Terjadi kesalahan sistem saat mengunggah: ${err.message || err}`);
+    } finally {
+      setUploadingFrame(false);
+      e.target.value = null;
+    }
+  };
+
+  const handleFolderUpload = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const pngFiles = files.filter(file => {
+      return file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+    });
+
+    if (pngFiles.length === 0) {
+      alert('Tidak ditemukan berkas gambar PNG (.png) di dalam folder tersebut.');
+      e.target.value = null;
+      return;
+    }
+
+    setUploadingFrame(true);
+    let successCount = 0;
+    let errors = [];
+
+    try {
+      const uploadPromises = pngFiles.map(async (file) => {
+        try {
+          const relativePath = file.webkitRelativePath || file.name;
+          const cleanName = relativePath.replace(/\.png$/i, '');
+          
+          const pathParts = relativePath.split('/');
+          const fileName = pathParts.pop();
+          const folderPath = pathParts.join('/');
+          
+          const uniqueFileName = `${Date.now()}-${Math.random().toString(36).substring(2, 10)}-${fileName}`;
+          const filePath = folderPath ? `${folderPath}/${uniqueFileName}` : `templates/${uniqueFileName}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('frames')
+            .upload(filePath, file);
+
+          if (uploadError) throw uploadError;
+
+          const { data: { publicUrl } } = supabase.storage
+            .from('frames')
+            .getPublicUrl(filePath);
+
+          const { data: insertData, error: dbError } = await supabase
+            .from('frames')
+            .insert([{ name: cleanName, image_url: publicUrl }])
+            .select();
+
+          if (dbError) throw dbError;
+
+          if (insertData && insertData.length > 0) {
+            successCount++;
+            return insertData[0].image_url;
+          }
+        } catch (err) {
+          errors.push(`${file.name}: ${err.message || err}`);
+        }
+        return null;
+      });
+
+      const results = await Promise.all(uploadPromises);
+      const newlyAddedUrls = results.filter(Boolean);
+
+      if (newlyAddedUrls.length > 0) {
+        setDbFrames(prev => [...prev, ...newlyAddedUrls]);
+        setFrame(newlyAddedUrls[newlyAddedUrls.length - 1]);
+      }
+
+      if (errors.length > 0) {
+        alert(`Berhasil mengunggah ${successCount} bingkai dari folder.\nGagal mengunggah beberapa berkas:\n${errors.join('\n')}`);
+      } else {
+        alert(`Berhasil mengunggah folder: ${successCount} bingkai PNG berhasil diunggah!`);
+      }
+    } catch (err) {
+      alert(`Terjadi kesalahan sistem saat mengunggah folder: ${err.message || err}`);
     } finally {
       setUploadingFrame(false);
       e.target.value = null;
@@ -703,14 +794,22 @@ const FrameAdmin = ({ onExit }) => {
           <>
             {/* Frame list */}
             <div style={{ width: 160, borderRight: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
-              <div style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+              <div style={{ padding: '0.75rem', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 <input type="file" accept="image/png" multiple style={{ display: 'none' }} ref={uploadFileInputRef} onChange={handleFrameUpload} />
+                <input type="file" webkitdirectory="" directory="" style={{ display: 'none' }} ref={uploadFolderInputRef} onChange={handleFolderUpload} />
                 <button 
                   onClick={() => uploadFileInputRef.current?.click()} 
                   disabled={uploadingFrame}
                   style={{ width: '100%', padding: '0.5rem', background: '#22c55e', border: 'none', borderRadius: '0.35rem', color: 'white', fontWeight: 700, cursor: uploadingFrame ? 'default' : 'pointer', fontSize: '0.75rem' }}
                 >
-                  {uploadingFrame ? 'Uploading...' : '+ Upload Frame'}
+                  {uploadingFrame ? 'Uploading...' : '+ Upload Files'}
+                </button>
+                <button 
+                  onClick={() => uploadFolderInputRef.current?.click()} 
+                  disabled={uploadingFrame}
+                  style={{ width: '100%', padding: '0.5rem', background: '#3b82f6', border: 'none', borderRadius: '0.35rem', color: 'white', fontWeight: 700, cursor: uploadingFrame ? 'default' : 'pointer', fontSize: '0.75rem' }}
+                >
+                  {uploadingFrame ? 'Uploading...' : '+ Upload Folder'}
                 </button>
               </div>
               <div style={{ flex: 1, overflowY: 'auto' }}>
