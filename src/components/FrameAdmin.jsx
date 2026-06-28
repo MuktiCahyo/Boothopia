@@ -4,8 +4,7 @@ import { loadConfigs, saveConfigs } from '../utils/configLoader';
 import { supabase } from '../utils/supabaseClient';
 
 const EMPTY_SLOTS = [];
-const FRAME_LIST = [1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 22, 23, 24, 25]
-  .map(n => `/frame/Template vol 6 20k/Trip - ${n}.png`);
+const FRAME_LIST = [];
 
 const PHOTO_ASPECT = 4 / 3; // w:h landscape
 const slotHPercent = (w) => w / PHOTO_ASPECT / 3; // e.g. w=80 → 20%
@@ -800,7 +799,17 @@ const FrameAdmin = ({ onExit }) => {
   };
 
   const save = async () => {
-    await saveConfigs(configs);
+    const updatedConfigs = { ...configs };
+    for (const f of dbFrames) {
+      if (!updatedConfigs[f] || updatedConfigs[f].slots?.length === 0) {
+        const fallback = getConfigForFrame(f);
+        if (fallback) {
+          updatedConfigs[f] = fallback;
+        }
+      }
+    }
+    await saveConfigs(updatedConfigs);
+    setConfigs(updatedConfigs);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);
   };

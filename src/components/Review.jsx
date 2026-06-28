@@ -171,8 +171,7 @@ const DraggablePhoto = ({ src, filters, aspectRatio = 4/3, roundness, slot, tran
 };
 
 const STATIC_FRAMES = [
-  null,
-  ...[1,2,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,22,23,24,25].map(n => `/frame/Template vol 6 20k/Trip - ${n}.png`)
+  null
 ];
 
 const PRESET_BGS = [
