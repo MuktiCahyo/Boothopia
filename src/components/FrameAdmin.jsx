@@ -386,6 +386,7 @@ const FrameAdmin = ({ onExit }) => {
   const [aspectRatioLocked, setAspectRatioLocked] = useState(true);
   const containerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const [bulkSelection, setBulkSelection] = useState(new Set());
 
   const [toast, setToast] = useState({ show: false, message: '', type: 'info' });
 
@@ -762,7 +763,7 @@ const FrameAdmin = ({ onExit }) => {
         const { error: storageError } = await supabase.storage
           .from('frames')
           .remove([storagePath]);
-        if (storageError) console.error("Error removing file from storage:", storageError);
+        if (storageError) throw new Error(`Storage error: ${storageError.message || storageError}`);
       }
 
       // 2. Delete from database
@@ -788,6 +789,74 @@ const FrameAdmin = ({ onExit }) => {
       showToast('Bingkai berhasil dihapus!', 'success');
     } catch (err) {
       showToast(`Gagal menghapus bingkai: ${err.message || err}`, 'error');
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const countToDelete = bulkSelection.size;
+    if (!confirm(`Apakah Anda yakin ingin menghapus ${countToDelete} bingkai terpilih dari database dan storage?`)) return;
+
+    setUploadingFrame(true);
+    let successCount = 0;
+    let errors = [];
+
+    const selectedList = [...bulkSelection];
+    const remainingConfigs = { ...configs };
+    let newDbFrames = [...dbFrames];
+
+    try {
+      for (const frameUrl of selectedList) {
+        try {
+          if (dbFrames.includes(frameUrl)) {
+            // Delete from storage
+            const decoded = decodeURIComponent(frameUrl);
+            const pathParts = decoded.split('/storage/v1/object/public/frames/');
+            if (pathParts.length === 2) {
+              const filePath = pathParts[1];
+              const { error: storageError } = await supabase.storage
+                .from('frames')
+                .remove([filePath]);
+              if (storageError) throw new Error(`Storage error: ${storageError.message || storageError}`);
+            }
+
+            // Delete from db
+            const { error: dbError } = await supabase
+              .from('frames')
+              .delete()
+              .eq('image_url', frameUrl);
+
+            if (dbError) throw dbError;
+
+            newDbFrames = newDbFrames.filter(f => f !== frameUrl);
+          }
+
+          delete remainingConfigs[frameUrl];
+          successCount++;
+        } catch (err) {
+          errors.push(`${label(frameUrl)}: ${err.message || err}`);
+        }
+      }
+
+      await saveConfigs(remainingConfigs);
+      setConfigs(remainingConfigs);
+      setDbFrames(newDbFrames);
+
+      // Reset selection if active frame got deleted
+      if (selectedList.includes(frame)) {
+        setFrame(newDbFrames[0] || '');
+      }
+
+      setBulkSelection(new Set());
+
+      if (errors.length > 0) {
+        showToast(`Berhasil menghapus ${successCount} bingkai.\nGagal menghapus beberapa bingkai:\n${errors.join('\n')}`, 'error');
+      } else {
+        showToast(`Berhasil menghapus ${successCount} bingkai!`, 'success');
+      }
+    } catch (err) {
+      showToast(`Terjadi kesalahan saat menghapus massal: ${err.message || err}`, 'error');
+    } finally {
+      setUploadingFrame(false);
     }
   };
 
@@ -914,14 +983,58 @@ const FrameAdmin = ({ onExit }) => {
                   {uploadingFrame ? 'Uploading...' : '+ Upload Folder'}
                 </button>
               </div>
+              {/* Select All / Header row */}
+              {allFrames.length > 0 && (
+                <div style={{ padding: '0.4rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.72rem', color: '#a1a1aa', cursor: 'pointer', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      checked={bulkSelection.size === allFrames.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setBulkSelection(new Set(allFrames));
+                        } else {
+                          setBulkSelection(new Set());
+                        }
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    Select All ({allFrames.length})
+                  </label>
+                </div>
+              )}
+
+              {/* Bulk Delete Button */}
+              {bulkSelection.size > 0 && (
+                <div style={{ padding: '0.4rem 0.75rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                  <button
+                    onClick={handleBulkDelete}
+                    style={{ width: '100%', padding: '0.4rem', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.3)', borderRadius: '0.25rem', color: '#ef4444', fontWeight: 700, cursor: 'pointer', fontSize: '0.75rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.3rem' }}
+                  >
+                    🗑️ Delete Selected ({bulkSelection.size})
+                  </button>
+                </div>
+              )}
+
               <div style={{ flex: 1, overflowY: 'auto' }}>
                 {allFrames.map(f => {
                   const ok = (configs[f]?.slots?.length > 0) || (getConfigForFrame(f)?.slots?.length > 0);
                   const isDynamic = dbFrames.includes(f);
+                  const isSelected = bulkSelection.has(f);
                   return (
-                    <div key={f} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', paddingRight: '0.5rem', background: frame === f ? 'rgba(99,102,241,0.1)' : 'transparent' }}>
+                    <div key={f} style={{ display: 'flex', alignItems: 'center', width: '100%', paddingRight: '0.5rem', background: frame === f ? 'rgba(99,102,241,0.1)' : 'transparent', borderBottom: '1px solid rgba(255,255,255,0.02)' }}>
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {
+                          const next = new Set(bulkSelection);
+                          if (next.has(f)) next.delete(f); else next.add(f);
+                          setBulkSelection(next);
+                        }}
+                        style={{ marginLeft: '0.5rem', cursor: 'pointer' }}
+                      />
                       <button onClick={() => setFrame(f)}
-                        style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.55rem 0.75rem', background: 'transparent', border: 'none', borderLeft: frame === f ? '3px solid #6366f1' : '3px solid transparent', color: frame === f ? '#fafafa' : '#71717a', cursor: 'pointer', textAlign: 'left', fontSize: '0.78rem', fontFamily: 'Outfit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.55rem 0.5rem', background: 'transparent', border: 'none', borderLeft: frame === f ? '3px solid #6366f1' : '3px solid transparent', color: frame === f ? '#fafafa' : '#71717a', cursor: 'pointer', textAlign: 'left', fontSize: '0.78rem', fontFamily: 'Outfit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {ok ? <CheckCircle size={12} color="#22c55e" /> : <AlertCircle size={12} color="#52525b" />}
                         {label(f)}
                       </button>
